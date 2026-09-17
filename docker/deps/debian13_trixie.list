@@ -1,0 +1,28 @@
+# Qt6 / KF6 build dependencies for klassy on Debian 13 "trixie" (stable, Plasma 6).
+# One apt package per line; `#` comments and blank lines are ignored.
+#
+# NOTE: trixie is frozen; if its Qt6/KF6/KDecoration are older than the latest
+# klassy requires, pin an earlier v6 tag (REF_debian13_trixie=v6.2) and swap
+# `libkdecorations3-dev` -> `libkdecorations2-dev` if needed.
+
+extra-cmake-modules
+
+# Qt6 (Svg + Xml only needed by the settings module)
+qt6-base-dev
+qt6-declarative-dev
+qt6-svg-dev
+
+# KDE Frameworks 6
+libkf6config-dev
+libkf6coreaddons-dev
+libkf6colorscheme-dev
+libkf6guiaddons-dev
+libkf6i18n-dev
+libkf6iconthemes-dev
+libkf6windowsystem-dev
+libkirigami-dev
+libkf6style-dev
+libkf6kcmutils-dev
+
+# Window decoration API (Plasma 6.2+ uses KDecoration3)
+libkdecorations3-dev

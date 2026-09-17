@@ -1,0 +1,5 @@
+# Local klassy source checkout (see `make clone`).
+/src/
+
+# Built .deb packages (see `make build`).
+/dist/

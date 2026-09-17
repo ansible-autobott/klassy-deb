@@ -1,0 +1,44 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Single source of truth: the release matrix comes from releases.mk via the
+  # Makefile, so it can never drift from a local `make build-all`.
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.releases.outputs.releases }}
+    steps:
+      - name: Checkout klassy-deb
+        uses: actions/checkout@v4
+      - name: Resolve release matrix
+        id: releases
+        run: echo "releases=$(make -s print-releases)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJson(needs.setup.outputs.releases) }}
+
+    steps:
+      - name: Checkout klassy-deb
+        uses: actions/checkout@v4
+
+      - name: Build klassy .deb for ${{ matrix.release }}
+        run: make ci-build RELEASE=${{ matrix.release }}
+
+      - name: Upload package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: klassy-${{ matrix.release }}
+          path: dist/${{ matrix.release }}/*.deb
+          if-no-files-found: warn

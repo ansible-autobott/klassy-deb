@@ -1,0 +1,59 @@
+name: publish
+
+# Publish a klassy build into the shared apt repo (ansible-autobott/debian-repo).
+# Git-tag driven: `make tag RELEASE=<r>` pushes a tag like debian_sid-v6.7.2 and
+# this workflow picks it up. klassy-deb has no version of its own — the release IS
+# the klassy version pinned as REF_<release> in releases.mk. One-time setup (the
+# DEBIAN_REPO_TOKEN secret) is described in the README.
+on:
+  push:
+    tags: ['*-v*']              # e.g. debian_sid-v6.7.2 (pushed by `make tag`)
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Debian release key from releases.mk (e.g. debian_sid)
+        default: debian13_trixie
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write            # create the release / upload the .deb asset
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout klassy-deb
+        uses: actions/checkout@v4
+
+      - name: Resolve release + tag
+        id: r
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            release="${GITHUB_REF_NAME%-v*}"      # debian_sid-v6.7.2 -> debian_sid
+            tag="$GITHUB_REF_NAME"
+          else
+            release="${{ inputs.release }}"
+            tag="$release-$(make -s print-ref RELEASE="$release")"
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build the .deb
+        run: make ci-build RELEASE="${{ steps.r.outputs.release }}"
+
+      - name: Attach the .deb to a GitHub release
+        run: |
+          tag='${{ steps.r.outputs.tag }}'
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --title "$tag" --generate-notes
+          gh release upload "$tag" "dist/${{ steps.r.outputs.release }}"/*.deb --clobber
+
+      # Registers packages/klassy.json in debian-repo (per-arch URL + sha256) and
+      # pushes it, triggering a publish. Pin @v1; use @main if v1 isn't tagged yet.
+      - name: Register with ansible-autobott/debian-repo
+        uses: ansible-autobott/debian-repo/.github/actions/register@v1
+        with:
+          name: klassy                       # must match the .deb Package field
+          dist-dir: dist/${{ steps.r.outputs.release }}
+          tag: ${{ steps.r.outputs.tag }}
+          token: ${{ secrets.DEBIAN_REPO_TOKEN }}

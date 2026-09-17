@@ -1,0 +1,25 @@
+# Qt6 / KF6 build dependencies for klassy on Debian unstable "sid" (Plasma 6).
+# One apt package per line; `#` comments and blank lines are ignored.
+# sid tracks the newest libraries, so it pairs with the latest klassy tag.
+
+extra-cmake-modules
+
+# Qt6 (Svg + Xml only needed by the settings module)
+qt6-base-dev
+qt6-declarative-dev
+qt6-svg-dev
+
+# KDE Frameworks 6
+libkf6config-dev
+libkf6coreaddons-dev
+libkf6colorscheme-dev
+libkf6guiaddons-dev
+libkf6i18n-dev
+libkf6iconthemes-dev
+libkf6windowsystem-dev
+libkirigami-dev
+libkf6style-dev
+libkf6kcmutils-dev
+
+# Window decoration API (Plasma 6.2+ uses KDecoration3)
+libkdecorations3-dev

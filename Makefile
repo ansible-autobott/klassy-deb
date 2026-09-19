@@ -38,12 +38,16 @@ OUT_DIR   = $(DIST_DIR)/$(CODENAME)
 
 # Debian packaging revision — bump to re-release the SAME klassy version after a
 # packaging-only change (deps fix, etc.). The .deb version is <klassy>-<PKGREV>~<suite>.
-# Per-release override: set PKGREV_<release> in releases.mk.
+# Per-release override: set PKGREV_<release> in releases.mk, which is the source of
+# truth CI reads. Passing PKGREV=N here builds that revision locally, but a tag
+# pushed that way is rejected by publish.yml — see releases.mk.
 PKGREV  ?= $(or $(PKGREV_$(RELEASE)),1)
 
-# Git tag that triggers the publish workflow — release + klassy version, derived
-# (never typed by hand), e.g. debian_sid-v6.7.2.
-TAG     ?= $(RELEASE)-$(REF)
+# Git tag that triggers the publish workflow — release + klassy version + packaging
+# revision, derived (never typed by hand), e.g. debian_sid-v6.7.2-2. The revision is
+# part of the tag so re-packaging the same klassy version gets its own tag, GitHub
+# release and asset URL instead of overwriting the previous one's.
+TAG     ?= $(RELEASE)-$(REF)-$(PKGREV)
 
 # Optional package metadata forwarded to the container.
 DEB_MAINTAINER ?=
@@ -138,12 +142,20 @@ clean-all: clean clean-src ## remove packages and the local clone
 .PHONY: tag
 tag: check-release ## publish a new release (make tag RELEASE=debian_sid [FORCE=1])
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null && [ "$(FORCE)" != "1" ]; then \
-		echo ">> tag $(TAG) already exists — bump PKGREV_$(RELEASE) in releases.mk, then re-run with FORCE=1"; \
+		echo ">> tag $(TAG) already exists — klassy $(REF) rev $(PKGREV) is already published for $(RELEASE)."; \
+		echo ">> to re-package it, bump PKGREV_$(RELEASE) in releases.mk and commit, then re-run."; \
+		echo ">> (FORCE=1 only re-runs this identical build; it does not make a new version.)"; \
 		exit 1; \
 	fi
-	@git tag $(if $(filter 1,$(FORCE)),-f,) -a "$(TAG)" -m "Publish klassy $(REF) for $(RELEASE)"
+	@git diff HEAD --quiet -- releases.mk || { \
+		echo ">> releases.mk has uncommitted changes — commit them before tagging."; \
+		echo ">> CI builds the tagged commit and reads PKGREV_$(RELEASE) from it, so an"; \
+		echo ">> uncommitted bump would publish a different revision than the tag names."; \
+		exit 1; \
+	}
+	@git tag $(if $(filter 1,$(FORCE)),-f,) -a "$(TAG)" -m "Publish klassy $(REF)-$(PKGREV) for $(RELEASE)"
 	@git push $(if $(filter 1,$(FORCE)),-f,) origin "$(TAG)"
-	@echo ">> $(RELEASE): CI is now building + publishing klassy $(REF) (tag $(TAG))"
+	@echo ">> $(RELEASE): CI is now building + publishing klassy $(REF) rev $(PKGREV) (tag $(TAG))"
 
 #==========================================================================================
 ##@ CI
@@ -163,6 +175,14 @@ print-ref: ## print the klassy ref/tag for RELEASE (used by publish.yml)
 .PHONY: print-codename
 print-codename: ## print the Debian codename for RELEASE (used by publish.yml)
 	@echo "$(CODENAME)"
+
+.PHONY: print-pkgrev
+print-pkgrev: ## print the Debian packaging revision for RELEASE (used by publish.yml)
+	@echo "$(PKGREV)"
+
+.PHONY: print-tag
+print-tag: ## print the publish tag for RELEASE (used by publish.yml, so the format lives here only)
+	@echo "$(TAG)"
 
 #==========================================================================================
 # Guards

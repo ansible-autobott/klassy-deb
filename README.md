@@ -101,12 +101,13 @@ line; `#` comments allowed) are a best-effort starting point taken from klassy's
 ## Publishing to the shared apt repo
 
 klassy-deb has no version of its own — a release *is* the klassy version pinned as
-`REF_<release>` in `releases.mk`. Publishing is **git-tag driven** (only `git`
-needed locally — no `gh`): `make tag` derives the tag from `REF` and pushes it,
-and `.github/workflows/publish.yml` picks it up.
+`REF_<release>` in `releases.mk`, plus the Debian packaging revision
+`PKGREV_<release>` (defaults to 1). Publishing is **git-tag driven** (only `git`
+needed locally — no `gh`): `make tag` derives the tag from both and pushes it, and
+`.github/workflows/publish.yml` picks it up.
 
 ```sh
-make tag RELEASE=debian_sid        # -> pushes tag  debian_sid-v6.7.2
+make tag RELEASE=debian_sid        # -> pushes tag  debian_sid-v6.7.2-1
 ```
 
 On that tag CI builds the `.deb`, attaches it to a GitHub release, then calls
@@ -121,11 +122,20 @@ never touches trixie's entry, so one suite's broken build cannot block another's
 fix. debian-repo merges them into a single `klassy` listing — the only rule is
 that no two files claim the same (package, release, arch).
 
-- **New klassy version?** bump `REF_<release>` in `releases.mk`, then
-  `make tag RELEASE=<r>`.
+- **New klassy version?** bump `REF_<release>` in `releases.mk` and drop any
+  `PKGREV_<release>` line (the revision counts builds of one upstream version, so it
+  restarts at 1), commit, then `make tag RELEASE=<r>`.
 - **Re-package the same version** (e.g. a deps fix)? bump `PKGREV_<release>` in
-  `releases.mk` (defaults to 1) and re-tag: `make tag RELEASE=<r> FORCE=1` — the
-  `.deb` becomes `6.7.2-2~sid`.
+  `releases.mk`, commit, then `make tag RELEASE=<r>` — the `.deb` becomes
+  `6.7.2-2~sid` and the tag `debian_sid-v6.7.2-2`. No `FORCE` needed: because the
+  revision is part of the tag, each re-package gets its own tag, GitHub release and
+  asset URL instead of overwriting the previous one's.
+
+Commit the `releases.mk` bump *before* tagging. CI builds the tagged commit and reads
+the revision from its `releases.mk`, so `make tag` refuses to run with that file
+dirty, and `publish.yml` fails the build if the tag's `-<rev>` and
+`PKGREV_<release>` disagree. Passing `PKGREV=2` on the command line is for local
+builds (`make build RELEASE=debian_sid PKGREV=2`); a tag pushed that way is rejected.
 
 (CI builds the `.deb` and uploads it to the GitHub release itself — `gh` runs
 only on the runner. Locally you only need `git`.)

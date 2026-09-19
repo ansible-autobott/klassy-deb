@@ -12,6 +12,15 @@
 # whatever codename Debian currently calls testing (forky today) — and a rolling
 # alias like `testing` is NOT a valid release there, only a real codename is.
 #
+# PKGREV_<key> is the Debian packaging revision: the -N in klassy 6.7.2-2~sid. Bump
+# it to re-release the SAME klassy version after a packaging-only change (deps fix,
+# maintainer change, …), and RESET it — delete the line, the default is 1 — whenever
+# you bump REF_<key>, since the revision counts builds of one upstream version.
+#
+# This file is the source of truth for it: `make tag` puts the revision in the tag
+# (debian_sid-v6.7.2-2) but CI reads the number from the tagged commit's releases.mk,
+# and publish.yml fails the build if the two disagree. So commit the bump, then tag.
+#
 # Any value here is overridable on the CLI, e.g.
 #   make build RELEASE=debian13_trixie REF_debian13_trixie=v6.7
 # because command-line variables take precedence over these assignments.

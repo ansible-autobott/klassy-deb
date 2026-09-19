@@ -1,13 +1,14 @@
 name: publish
 
 # Publish a klassy build into the shared apt repo (ansible-autobott/debian-repo).
-# Git-tag driven: `make tag RELEASE=<r>` pushes a tag like debian_sid-v6.7.2 and
+# Git-tag driven: `make tag RELEASE=<r>` pushes a tag like debian_sid-v6.7.2-2 and
 # this workflow picks it up. klassy-deb has no version of its own — the release IS
-# the klassy version pinned as REF_<release> in releases.mk. One-time setup (the
+# the klassy version pinned as REF_<release> in releases.mk, plus the Debian
+# packaging revision PKGREV_<release> (the trailing -2). One-time setup (the
 # DEBIAN_REPO_TOKEN secret) is described in the README.
 on:
   push:
-    tags: ['*-v*']              # e.g. debian_sid-v6.7.2 (pushed by `make tag`)
+    tags: ['*-v*']              # e.g. debian_sid-v6.7.2-2 (pushed by `make tag`)
   workflow_dispatch:
     inputs:
       release:
@@ -29,11 +30,13 @@ jobs:
         id: r
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            release="${GITHUB_REF_NAME%-v*}"      # debian_sid-v6.7.2 -> debian_sid
+            release="${GITHUB_REF_NAME%-v*}"      # debian_sid-v6.7.2-2 -> debian_sid
             tag="$GITHUB_REF_NAME"
+            tag_rev="${GITHUB_REF_NAME##*-}"      # debian_sid-v6.7.2-2 -> 2
           else
             release="${{ inputs.release }}"
-            tag="$release-$(make -s print-ref RELEASE="$release")"
+            tag_rev=""                            # derived from releases.mk, so nothing to check
+            tag="$(make -s print-tag RELEASE="$release")"
           fi
           # The Debian codename, not the release key, is what the apt repo keys on
           # (dist/ subdir, `release` field, package filename). Resolve it from
@@ -41,6 +44,23 @@ jobs:
           # otherwise register an empty release and break debian-repo's publish.
           codename="$(make -s print-codename RELEASE="$release")"
           [ -n "$codename" ] || { echo "::error::no CODENAME_$release in releases.mk"; exit 1; }
+          # The tag names the packaging revision, but the build reads it from this
+          # commit's releases.mk (PKGREV_<release>) — so they must agree. They only
+          # diverge when a tag was pushed before the bump was committed, which would
+          # publish 6.7.2-1 under a …-2 tag: same asset name as the previous release,
+          # wrong version registered in debian-repo. Fail before building instead.
+          pkgrev="$(make -s print-pkgrev RELEASE="$release")"
+          if [ -n "$tag_rev" ]; then
+            case "$tag_rev" in
+              ''|*[!0-9]*)
+                echo "::error::tag '$tag' has no numeric packaging revision — expected <release>-v<version>-<rev>, e.g. debian_sid-v6.7.2-2 (run 'make tag RELEASE=$release')"
+                exit 1 ;;
+            esac
+            [ "$tag_rev" = "$pkgrev" ] || {
+              echo "::error::tag '$tag' says packaging revision $tag_rev but releases.mk at this commit has PKGREV_$release=$pkgrev — commit the bump, then re-tag"
+              exit 1
+            }
+          fi
           echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "codename=$codename" >> "$GITHUB_OUTPUT"

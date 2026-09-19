@@ -157,6 +157,46 @@ from the control fields, so what apt serves is unaffected.
 ## Packaging mechanism
 
 Klassy ships no Debian packaging, so the container stages `cmake --install` into
-a `DESTDIR` and wraps it with `dpkg-deb`. Runtime `Depends` are currently
-minimal — for production-grade packages, add `dpkg-shlibdeps` or author a
-proper `debian/` directory.
+a `DESTDIR` and wraps it with `dpkg-deb`.
+
+### Runtime dependencies
+
+`Depends` is **generated per build by `dpkg-shlibdeps`**, never hand-written: it
+maps every shared library the compiled binaries `NEED` back to the Debian package
+providing it, so each suite gets the dependencies of the exact stack it was
+compiled against. trixie resolves to `libqt6core6t64 (>= 6.8.2)`, sid to whatever
+its newer Qt6 provides — and the versioned floors track upstream automatically.
+
+Three details make this work without debhelper:
+
+- The staging `DESTDIR` is `/tmp/pkg/debian/<package>`, and `DEBIAN/` is created
+  *before* `dpkg-shlibdeps` runs. It finds the package root by walking up from
+  each binary looking for a `DEBIAN/` directory; without it, every object is
+  reported as "should already be installed in their package's directory" and
+  treated as living outside the package.
+- `debian/shlibs.local` declares klassy's *own* private library
+  (`libklassycommon6.so.6`) — no installed package provides it, and
+  `dpkg-shlibdeps` fails hard on unknown `NEED`s. The entry is derived from the
+  staged `SONAME`s, so it covers both the Qt5 (`…common5`) and Qt6 builds. The
+  resulting self-dependency is filtered out of `Depends`.
+- `-l` points at the staged library directory so that private library can be read
+  from the build tree rather than the system.
+
+Anything not discoverable from ELF headers is declared by hand in
+`build-package.sh`: `Recommends: kwin-wayland | kwin-x11, systemsettings` (the
+decoration needs a KWin to load it, and systemsettings to select it) and
+`Suggests: plasma-desktop`.
+
+Verify a build's dependencies resolve on a clean system with:
+
+```sh
+docker run --rm -v "$PWD/dist/trixie:/deb:ro" debian:trixie-slim \
+  sh -c 'apt-get update -qq && apt-get install -y --simulate /deb/klassy_*.deb'
+```
+
+### Maintainer
+
+`Maintainer` defaults to `Andres Bott <contact@andresbott.com>` in
+`docker/build-package.sh`; override per build with `make build DEB_MAINTAINER='…'`.
+`Homepage` deliberately stays on upstream klassy — these are unofficial builds,
+which the extended description states.

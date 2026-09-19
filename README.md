@@ -12,16 +12,21 @@ testing, and unstable suites ship different Qt6/KF6 versions. So each release
 builds in its own container against that suite's libraries, pinning a klassy
 tag those libraries can satisfy:
 
-| Release           | Base image            | klassy ref (default) |
-|-------------------|-----------------------|----------------------|
-| `debian13_trixie` | `debian:trixie-slim`  | `v6.5.3`             |
-| `debian_testing`  | `debian:testing-slim` | `v6.7.2`             |
-| `debian_sid`      | `debian:sid-slim`     | `v6.7.2`             |
+| Release           | Base image            | Codename | klassy ref (default) |
+|-------------------|-----------------------|----------|----------------------|
+| `debian13_trixie` | `debian:trixie-slim`  | `trixie` | `v6.5.3`             |
+| `debian_testing`  | `debian:testing-slim` | `forky`  | `v6.7.2`             |
+| `debian_sid`      | `debian:sid-slim`     | `sid`    | `v6.7.2`             |
 
 All three build the Qt6 / KF6 / KDecoration3 stack.
 
 Each release sets its base image via `IMAGE_<release>` in `releases.mk` — the
-release keys are just labels and don't have to match a Docker tag.
+release keys are just labels and don't have to match a Docker tag. The **codename**
+(`CODENAME_<release>`) is the part that must be real: it becomes the `.deb`'s
+version suffix (`~forky`), the `dist/` subdirectory, and the release the apt repo
+files the package under. It cannot be inferred from the key — `debian_testing`
+targets whatever codename Debian currently calls testing, so when forky is
+promoted to stable, `CODENAME_debian_testing` moves to the next one.
 
 Each ref is pinned to its suite's libraries: trixie (KF6 6.13, Qt6 6.8) builds
 klassy `v6.5.3`, while testing/sid (KF6 6.28/6.30, Qt6 6.10) build the latest
@@ -41,7 +46,7 @@ make list                             # show built .deb files
 ```
 
 The klassy source is cloned into `src/klassy/` and packages land in
-`dist/<release>/` — both are git-ignored.
+`dist/<codename>/` (e.g. `dist/forky/`) — both are git-ignored.
 
 ## Layout
 
@@ -54,7 +59,7 @@ The klassy source is cloned into `src/klassy/` and packages land in
 │   ├── build-package.sh         # cmake build + install -> dpkg-deb
 │   └── deps/<release>.list      # apt build-deps per release (tunable)
 ├── src/klassy/                  # (git-ignored) upstream clone
-├── dist/<release>/*.deb         # (git-ignored) built artifacts
+├── dist/<codename>/*.deb        # (git-ignored) built artifacts
 └── .github/workflows/build.yml  # matrix CI derived from `make print-releases`
 ```
 
@@ -105,8 +110,16 @@ make tag RELEASE=debian_sid        # -> pushes tag  debian_sid-v6.7.2
 ```
 
 On that tag CI builds the `.deb`, attaches it to a GitHub release, then calls
-debian-repo's `register` action — which commits `packages/klassy.json` there and
-triggers a publish. You never type a version; it comes from `REF_<release>`.
+debian-repo's `register` action — which commits
+`packages/klassy.<codename>.json` there and triggers a publish. You never type a
+version; it comes from `REF_<release>` and is read back out of the built `.deb`.
+
+All three releases can be served at once, and each publishes independently: a
+package file in debian-repo holds one version, so every codename gets its own
+file (`klassy.trixie.json`, `klassy.forky.json`, `klassy.sid.json`). Tagging `sid`
+never touches trixie's entry, so one suite's broken build cannot block another's
+fix. debian-repo merges them into a single `klassy` listing — the only rule is
+that no two files claim the same (package, release, arch).
 
 - **New klassy version?** bump `REF_<release>` in `releases.mk`, then
   `make tag RELEASE=<r>`.
@@ -127,10 +140,19 @@ as the **`DEBIAN_REPO_TOKEN`** secret in this repo:
 - or a classic PAT with the **`repo`** scope (authorize SSO for
   `ansible-autobott` if enforced).
 
-debian-repo holds one `klassy` per architecture, so publishing a second release
-overwrites `packages/klassy.json` — publish a single release, or add per-suite /
-per-name publishing if you need all three served at once. The `register` action
-is pinned `@v1` (switch to `@main` if debian-repo hasn't tagged `v1` yet).
+The `register` action is currently used at `@main`, because debian-repo has not
+tagged a `v1` yet; re-pin `publish.yml` to `@v1` once it does, to insulate this
+repo from format changes.
+
+Note the uploaded asset is named `klassy_6.7.2-1.sid_amd64.deb` — a `.` where the
+version has a `~`. **GitHub rewrites `~` to `.` in release asset names** (verified:
+uploading `klassy_6.7.2-1~sid_amd64.deb` stores it as `klassy_6.7.2-1.sid_amd64.deb`),
+and debian-repo records its download URL from the filename — so emitting the tilde
+would 404 every publish. `docker/build-package.sh` therefore does the substitution
+itself, keeping the built filename and the asset name identical. The `.deb`'s own
+`Version` keeps the tilde, which is what actually matters: apt needs it to rank
+`6.7.2-1~sid` below a future `6.7.2-1`. debian-repo re-derives the pooled filename
+from the control fields, so what apt serves is unaffected.
 
 ## Packaging mechanism
 

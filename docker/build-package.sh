@@ -83,7 +83,16 @@ Description: Klassy window decoration and application style for KDE Plasma
 EOF
 
 mkdir -p "$OUT"
-DEB="${OUT}/${PKG_NAME}_${DEB_VERSION}_${ARCH}.deb"
+# The FILENAME replaces '~' with '.'; the control Version above keeps the tilde,
+# which is the part that matters (apt needs it to rank 6.7.2-1~sid *below* a
+# later 6.7.2-1). This is NOT cosmetic: GitHub rewrites '~' to '.' in release
+# asset names — verified by upload, klassy_6.7.2-1~sid_amd64.deb is stored as
+# klassy_6.7.2-1.sid_amd64.deb — and debian-repo records its download URL from
+# this filename, so emitting the tilde here would 404 every publish. Doing the
+# same substitution up front keeps the local name and the asset name identical.
+# The pooled filename is canonicalized from the control fields by the repo, so
+# all that is required here is that <arch> stays the trailing component.
+DEB="${OUT}/${PKG_NAME}_${DEB_VERSION//\~/.}_${ARCH}.deb"
 dpkg-deb --root-owner-group --build "$STAGE" "$DEB"
 
 echo ">> wrote ${DEB}"

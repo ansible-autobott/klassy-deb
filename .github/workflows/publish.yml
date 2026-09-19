@@ -35,8 +35,15 @@ jobs:
             release="${{ inputs.release }}"
             tag="$release-$(make -s print-ref RELEASE="$release")"
           fi
+          # The Debian codename, not the release key, is what the apt repo keys on
+          # (dist/ subdir, `release` field, package filename). Resolve it from
+          # releases.mk and fail loudly on an unknown key — a bogus tag would
+          # otherwise register an empty release and break debian-repo's publish.
+          codename="$(make -s print-codename RELEASE="$release")"
+          [ -n "$codename" ] || { echo "::error::no CODENAME_$release in releases.mk"; exit 1; }
           echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "codename=$codename" >> "$GITHUB_OUTPUT"
 
       - name: Build the .deb
         run: make ci-build RELEASE="${{ steps.r.outputs.release }}"
@@ -46,14 +53,28 @@ jobs:
           tag='${{ steps.r.outputs.tag }}'
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" --generate-notes
-          gh release upload "$tag" "dist/${{ steps.r.outputs.release }}"/*.deb --clobber
+          gh release upload "$tag" "dist/${{ steps.r.outputs.codename }}"/*.deb --clobber
 
-      # Registers packages/klassy.json in debian-repo (per-arch URL + sha256) and
-      # pushes it, triggering a publish. Pin @v1; use @main if v1 isn't tagged yet.
+      # Registers a package reference in debian-repo (per-arch URL + sha256) and
+      # pushes it, triggering a publish there.
+      #
+      # `dist-dir: dist` (not dist/<codename>) is deliberate: register reads each
+      # SUBDIRECTORY name as the target release, so dist/sid/*.deb registers for
+      # sid alone. A flat dist-dir would register as `any` and place this build
+      # into every suite.
+      #
+      # `file` gives each codename its own package file. A package file holds one
+      # version, and klassy ships different versions per suite (trixie gets v6.5.3
+      # — see releases.mk), so a shared packages/klassy.json would mean each tag
+      # clobbered the previous suite's entry. Separate files also keep the suites
+      # independent: publishing sid never rewrites trixie's entry.
+      #
+      # TODO: re-pin to @v1 once debian-repo tags a v1 (it has no tags yet).
       - name: Register with ansible-autobott/debian-repo
-        uses: ansible-autobott/debian-repo/.github/actions/register@v1
+        uses: ansible-autobott/debian-repo/.github/actions/register@main
         with:
           name: klassy                       # must match the .deb Package field
-          dist-dir: dist/${{ steps.r.outputs.release }}
+          dist-dir: dist
+          file: packages/klassy.${{ steps.r.outputs.codename }}.json
           tag: ${{ steps.r.outputs.tag }}
           token: ${{ secrets.DEBIAN_REPO_TOKEN }}

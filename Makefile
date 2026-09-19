@@ -12,21 +12,29 @@ IMAGE_NAME  ?= klassy-deb
 # Extra flags passed to the initial `git clone` (e.g. --filter=blob:none, --depth=1).
 CLONE_FLAGS ?=
 
-# Release definitions — RELEASES plus REF_<release>/QT_<release>/IMAGE_<release> —
-# live in one file so the Makefile and the CI matrix share a single source of
+# Release definitions — RELEASES plus REF_/QT_/IMAGE_/CODENAME_<release> — live in
+# one file so the Makefile and the CI matrix share a single source of
 # truth. Override any value on the CLI, e.g.  make build RELEASE=debian_sid REF_debian_sid=v6.5
 include releases.mk
 
 # The release this invocation targets. Override on the CLI:
 #   make build RELEASE=debian_sid
-RELEASE ?= debian13_trixie
-REF     ?= $(REF_$(RELEASE))
-QT      ?= $(QT_$(RELEASE))
-IMAGE   ?= $(IMAGE_$(RELEASE))
+RELEASE  ?= debian13_trixie
+REF      ?= $(REF_$(RELEASE))
+QT       ?= $(QT_$(RELEASE))
+IMAGE    ?= $(IMAGE_$(RELEASE))
+CODENAME ?= $(CODENAME_$(RELEASE))
 
-# Debian suite/codename for the .deb version suffix, derived from the release key
-# (debian13_trixie -> trixie, debian_sid -> sid). Override with SUITE=... if needed.
-SUITE   ?= $(lastword $(subst _, ,$(RELEASE)))
+# Debian codename for the .deb version suffix. Comes from CODENAME_<release> in
+# releases.mk, never from the release key: `debian_testing` targets whichever
+# codename Debian currently calls testing (forky), and `testing` itself is a
+# rolling alias the apt repo rejects as a release. Override with SUITE=... if needed.
+SUITE    ?= $(CODENAME)
+
+# Where a build lands: dist/<codename>/, NOT dist/<release key>/. debian-repo's
+# register action reads the subdirectory name as the target release, and only a
+# real codename from its DISTS is accepted there.
+OUT_DIR   = $(DIST_DIR)/$(CODENAME)
 
 # Debian packaging revision — bump to re-release the SAME klassy version after a
 # packaging-only change (deps fix, etc.). The .deb version is <klassy>-<PKGREV>~<suite>.
@@ -81,12 +89,12 @@ image: check-release ## build the builder image for RELEASE
 		docker
 
 .PHONY: build
-build: update image ## compile klassy in Docker and emit a .deb -> $(DIST_DIR)/RELEASE/
-	@mkdir -p "$(DIST_DIR)/$(RELEASE)"
+build: update image ## compile klassy in Docker and emit a .deb -> $(DIST_DIR)/<codename>/
+	@mkdir -p "$(OUT_DIR)"
 	@echo ">> building klassy .deb for $(RELEASE) (ref $(REF), Qt$(QT), suite $(SUITE), rev $(PKGREV))"
 	@docker run --rm \
 		-v "$(CURDIR_ABS)/$(SRC_DIR):/src:ro" \
-		-v "$(CURDIR_ABS)/$(DIST_DIR)/$(RELEASE):/out" \
+		-v "$(CURDIR_ABS)/$(OUT_DIR):/out" \
 		-e QT_MAJOR="$(QT)" \
 		-e DEB_SUITE="$(SUITE)" \
 		-e PKGREV="$(PKGREV)" \
@@ -104,7 +112,7 @@ build-all: ## build a .deb for every release in $(RELEASES)
 shell: check-release image ## open a shell in the builder image for RELEASE (debugging)
 	@docker run --rm -it \
 		-v "$(CURDIR_ABS)/$(SRC_DIR):/src:ro" \
-		-v "$(CURDIR_ABS)/$(DIST_DIR)/$(RELEASE):/out" \
+		-v "$(CURDIR_ABS)/$(OUT_DIR):/out" \
 		-e QT_MAJOR="$(QT)" -e DEB_SUITE="$(SUITE)" \
 		--entrypoint /bin/bash \
 		$(IMAGE_NAME):$(RELEASE)
@@ -152,13 +160,17 @@ print-releases: ## print $(RELEASES) as a JSON array (feeds the CI matrix)
 print-ref: ## print the klassy ref/tag for RELEASE (used by publish.yml)
 	@echo "$(REF)"
 
+.PHONY: print-codename
+print-codename: ## print the Debian codename for RELEASE (used by publish.yml)
+	@echo "$(CODENAME)"
+
 #==========================================================================================
 # Guards
 #==========================================================================================
 .PHONY: check-release
 check-release:
-	@[ -n "$(REF)" ] && [ -n "$(QT)" ] && [ -n "$(IMAGE)" ] || { \
-		echo ">> RELEASE '$(RELEASE)' is missing REF/QT/IMAGE in releases.mk."; \
+	@[ -n "$(REF)" ] && [ -n "$(QT)" ] && [ -n "$(IMAGE)" ] && [ -n "$(CODENAME)" ] || { \
+		echo ">> RELEASE '$(RELEASE)' is missing REF/QT/IMAGE/CODENAME in releases.mk."; \
 		echo ">> known releases: $(RELEASES)"; \
 		exit 1; \
 	}

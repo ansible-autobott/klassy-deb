@@ -40,5 +40,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: klassy-${{ matrix.release }}
-          path: dist/${{ matrix.release }}/*.deb
+          path: dist/*/*.deb        # dist/<codename>/ — one per job, see releases.mk
           if-no-files-found: warn

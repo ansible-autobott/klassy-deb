@@ -2,23 +2,24 @@
 
 Build the [Klassy](https://github.com/paulmcauley/klassy) KDE Plasma theme
 (window decoration + application style) as installable **`.deb`** packages for
-several Debian releases. Each release is compiled inside its own Docker
-container so it links against that release's Qt / KDE Frameworks stack.
+several Debian and Ubuntu releases. Each release is compiled inside its own
+Docker container so it links against that release's Qt / KDE Frameworks stack.
 
 ## Why per-release Docker builds
 
 Klassy pins minimum Qt6 / KDE Frameworks 6 versions, and Debian's stable,
-testing, and unstable suites ship different Qt6/KF6 versions. So each release
-builds in its own container against that suite's libraries, pinning a klassy
-tag those libraries can satisfy:
+testing, and unstable suites — plus Ubuntu — ship different Qt6/KF6 versions. So
+each release builds in its own container against that suite's libraries, pinning
+a klassy tag those libraries can satisfy:
 
-| Release           | Base image            | Codename | klassy ref (default) |
-|-------------------|-----------------------|----------|----------------------|
-| `debian13_trixie` | `debian:trixie-slim`  | `trixie` | `v6.5.3`             |
-| `debian_testing`  | `debian:testing-slim` | `forky`  | `v6.7.2`             |
-| `debian_sid`      | `debian:sid-slim`     | `sid`    | `v6.7.2`             |
+| Release               | Base image            | Codename   | klassy ref (default) |
+|-----------------------|-----------------------|------------|----------------------|
+| `debian13_trixie`     | `debian:trixie-slim`  | `trixie`   | `v6.5.3`             |
+| `debian_testing`      | `debian:testing-slim` | `forky`    | `v6.7.2`             |
+| `debian_sid`          | `debian:sid-slim`     | `sid`      | `v6.7.2`             |
+| `ubuntu2604_resolute` | `ubuntu:26.04`        | `resolute` | `v6.7.2`             |
 
-All three build the Qt6 / KF6 / KDecoration3 stack.
+They all build the Qt6 / KF6 / KDecoration3 stack.
 
 Each release sets its base image via `IMAGE_<release>` in `releases.mk` — the
 release keys are just labels and don't have to match a Docker tag. The **codename**
@@ -29,8 +30,9 @@ targets whatever codename Debian currently calls testing, so when forky is
 promoted to stable, `CODENAME_debian_testing` moves to the next one.
 
 Each ref is pinned to its suite's libraries: trixie (KF6 6.13, Qt6 6.8) builds
-klassy `v6.5.3`, while testing/sid (KF6 6.28/6.30, Qt6 6.10) build the latest
-`v6.7.2` — `v6.7+` requires KF6 6.22. To retarget a release, override its ref:
+klassy `v6.5.3`, while testing/sid (KF6 6.28/6.30, Qt6 6.10) and Ubuntu 26.04
+(KF6 6.24, Qt6 6.10.2) build the latest `v6.7.2` — `v6.7+` requires KF6 6.22 and
+Qt6 6.10. To retarget a release, override its ref:
 
 ```sh
 make build RELEASE=debian13_trixie REF_debian13_trixie=v6.7   # + tune its deps list
@@ -115,11 +117,16 @@ debian-repo's `register` action — which commits
 `packages/klassy.<codename>.json` there and triggers a publish. You never type a
 version; it comes from `REF_<release>` and is read back out of the built `.deb`.
 
-All three releases can be served at once, and each publishes independently: a
+`register` only accepts a codename listed in debian-repo's own `DISTS`, so a
+release whose codename isn't there yet (e.g. Ubuntu's `resolute`) must be added
+on that side first; until then it still builds locally and in `build.yml`, it
+just cannot be published.
+
+Every release can be served at once, and each publishes independently: a
 package file in debian-repo holds one version, so every codename gets its own
-file (`klassy.trixie.json`, `klassy.forky.json`, `klassy.sid.json`). Tagging `sid`
-never touches trixie's entry, so one suite's broken build cannot block another's
-fix. debian-repo merges them into a single `klassy` listing — the only rule is
+file (`klassy.trixie.json`, `klassy.forky.json`, `klassy.sid.json`,
+`klassy.resolute.json`). Tagging `sid` never touches trixie's entry, so one
+suite's broken build cannot block another's fix. debian-repo merges them into a single `klassy` listing — the only rule is
 that no two files claim the same (package, release, arch).
 
 - **New klassy version?** bump `REF_<release>` in `releases.mk` and drop any

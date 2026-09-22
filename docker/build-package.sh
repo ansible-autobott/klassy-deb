@@ -5,7 +5,7 @@
 #
 # Inputs (environment):
 #   QT_MAJOR        5 or 6            (which Qt/KF stack to build)
-#   DEB_SUITE       e.g. trixie       (Debian codename; version suffix + metadata)
+#   DEB_SUITE       e.g. trixie       (distro codename; version suffix + metadata)
 #   PKGREV          default: 1        (Debian packaging revision)
 #   PKG_NAME        default: klassy
 #   PKG_VERSION     default: read from CMakeLists.txt PROJECT_VERSION (the klassy version)
@@ -137,7 +137,7 @@ Suggests: plasma-desktop
 Homepage: https://github.com/paulmcauley/klassy
 Description: Klassy window decoration and application style for KDE Plasma
  Klassy offers highly customizable theming for the KDE Plasma desktop.
- Built for Debian ${DEB_SUITE:-unknown} against the Qt${QT_MAJOR} stack.
+ Built for ${DEB_SUITE:-unknown} against the Qt${QT_MAJOR} stack.
  .
  Unofficial build packaged by ${DEB_MAINTAINER}; not affiliated with upstream.
 EOF

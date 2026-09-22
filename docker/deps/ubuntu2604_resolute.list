@@ -1,0 +1,26 @@
+# Qt6 / KF6 build dependencies for klassy on Ubuntu 26.04 LTS "resolute" (Plasma 6).
+# One apt package per line; `#` comments and blank lines are ignored.
+# Ubuntu inherits Debian's KF6/Qt6 packaging, so the names match debian_sid.list;
+# what differs is the versions (KF6 6.24 / Qt6 6.10.2), which still satisfy v6.7.2.
+
+extra-cmake-modules
+
+# Qt6 (Svg + Xml only needed by the settings module)
+qt6-base-dev
+qt6-declarative-dev
+qt6-svg-dev
+
+# KDE Frameworks 6
+libkf6config-dev
+libkf6coreaddons-dev
+libkf6colorscheme-dev
+libkf6guiaddons-dev
+libkf6i18n-dev
+libkf6iconthemes-dev
+libkf6windowsystem-dev
+libkirigami-dev
+libkf6style-dev
+libkf6kcmutils-dev
+
+# Window decoration API (Plasma 6.2+ uses KDecoration3)
+libkdecorations3-dev

@@ -31,9 +31,9 @@ CODENAME ?= $(CODENAME_$(RELEASE))
 # rolling alias the apt repo rejects as a release. Override with SUITE=... if needed.
 SUITE    ?= $(CODENAME)
 
-# Where a build lands: dist/<codename>/, NOT dist/<release key>/. debian-repo's
-# register action reads the subdirectory name as the target release, and only a
-# real codename from its DISTS is accepted there.
+# Where a build lands: dist/<codename>/, NOT dist/<release key>/. The engine that
+# registers it in debian-repo reads the subdirectory name as the target release,
+# and only a real codename from debian-repo's DISTS is accepted there.
 OUT_DIR   = $(DIST_DIR)/$(CODENAME)
 
 # Debian packaging revision — bump to re-release the SAME klassy version after a

@@ -5,7 +5,7 @@ name: publish
 # this workflow picks it up. klassy-deb has no version of its own — the release IS
 # the klassy version pinned as REF_<release> in releases.mk, plus the Debian
 # packaging revision PKGREV_<release> (the trailing -2). One-time setup (the
-# DEBIAN_REPO_TOKEN secret) is described in the README.
+# APT_APP_ID / APT_APP_PRIVATE_KEY org credentials) is described in the README.
 on:
   push:
     tags: ['*-v*']              # e.g. debian_sid-v6.7.2-2 (pushed by `make tag`)
@@ -16,10 +16,13 @@ on:
         default: debian13_trixie
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: write            # create the release / upload the .deb asset
+    outputs:
+      tag: ${{ steps.r.outputs.tag }}
+      codename: ${{ steps.r.outputs.codename }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -75,26 +78,42 @@ jobs:
             || gh release create "$tag" --title "$tag" --generate-notes
           gh release upload "$tag" "dist/${{ steps.r.outputs.codename }}"/*.deb --clobber
 
-      # Registers a package reference in debian-repo (per-arch URL + sha256) and
-      # pushes it, triggering a publish there.
-      #
-      # `dist-dir: dist` (not dist/<codename>) is deliberate: register reads each
-      # SUBDIRECTORY name as the target release, so dist/sid/*.deb registers for
-      # sid alone. A flat dist-dir would register as `any` and place this build
-      # into every suite.
-      #
-      # `file` gives each codename its own package file. A package file holds one
-      # version, and klassy ships different versions per suite (trixie gets v6.5.3
-      # — see releases.mk), so a shared packages/klassy.json would mean each tag
-      # clobbered the previous suite's entry. Separate files also keep the suites
-      # independent: publishing sid never rewrites trixie's entry.
-      #
-      # TODO: re-pin to @v1 once debian-repo tags a v1 (it has no tags yet).
-      - name: Register with ansible-autobott/debian-repo
-        uses: ansible-autobott/debian-repo/.github/actions/register@main
+      # Hands the .deb to the apt job below. The whole dist/ (not dist/<codename>)
+      # is deliberate: the engine reads each SUBDIRECTORY name as the target
+      # release, so dist/sid/*.deb registers for sid alone. A flat artifact would
+      # register as `any` and place this build into every suite.
+      - name: Upload the .deb for debian-repo
+        uses: actions/upload-artifact@v4
         with:
-          name: klassy                       # must match the .deb Package field
-          dist-dir: dist
-          file: packages/klassy.${{ steps.r.outputs.codename }}.json
-          tag: ${{ steps.r.outputs.tag }}
-          token: ${{ secrets.DEBIAN_REPO_TOKEN }}
+          name: debs
+          path: dist
+          if-no-files-found: error
+
+  # Registers a package reference in debian-repo (per-arch URL + sha256) through
+  # the gh-action-debian-repo engine and pushes it, triggering a publish there.
+  # The default GITHUB_TOKEN cannot push to another repo, so the engine mints a
+  # short-lived token from the ansible-autobott APT GitHub App (org variable
+  # APT_APP_ID + secret APT_APP_PRIVATE_KEY), scoped to debian-repo.
+  #
+  # `file` gives each codename its own package file. A package file holds one
+  # version, and klassy ships different versions per suite (trixie gets v6.5.3
+  # — see releases.mk), so a shared packages/klassy.json would mean each tag
+  # clobbered the previous suite's entry. Separate files also keep the suites
+  # independent: publishing sid never rewrites trixie's entry.
+  #
+  # `tag` is passed explicitly so a workflow_dispatch run, which is not on a tag,
+  # still names the release holding the .deb.
+  apt:
+    needs: build
+    permissions:
+      contents: read
+    uses: andresbott/gh-action-debian-repo/.github/workflows/publish.yml@v1
+    with:
+      name: klassy                       # must match the .deb Package field
+      artifact: debs
+      tag: ${{ needs.build.outputs.tag }}
+      file: packages/klassy.${{ needs.build.outputs.codename }}.json
+      collection: ansible-autobott/debian-repo
+      app-id: ${{ vars.APT_APP_ID }}
+    secrets:
+      app-private-key: ${{ secrets.APT_APP_PRIVATE_KEY }}

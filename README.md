@@ -112,12 +112,13 @@ needed locally — no `gh`): `make tag` derives the tag from both and pushes it,
 make tag RELEASE=debian_sid        # -> pushes tag  debian_sid-v6.7.2-1
 ```
 
-On that tag CI builds the `.deb`, attaches it to a GitHub release, then calls
-debian-repo's `register` action — which commits
-`packages/klassy.<codename>.json` there and triggers a publish. You never type a
-version; it comes from `REF_<release>` and is read back out of the built `.deb`.
+On that tag CI builds the `.deb`, attaches it to a GitHub release, then hands it
+to the [gh-action-debian-repo](https://github.com/andresbott/gh-action-debian-repo)
+engine — which commits `packages/klassy.<codename>.json` to debian-repo and
+triggers a publish there. You never type a version; it comes from
+`REF_<release>` and is read back out of the built `.deb`.
 
-`register` only accepts a codename listed in debian-repo's own `DISTS`, so a
+The engine only accepts a codename listed in debian-repo's own `DISTS`, so a
 release whose codename isn't there yet (e.g. Ubuntu's `resolute`) must be added
 on that side first; until then it still builds locally and in `build.yml`, it
 just cannot be published.
@@ -147,26 +148,17 @@ builds (`make build RELEASE=debian_sid PKGREV=2`); a tag pushed that way is reje
 (CI builds the `.deb` and uploads it to the GitHub release itself — `gh` runs
 only on the runner. Locally you only need `git`.)
 
-**One-time setup** — create a token that can push to `debian-repo` and store it
-as the **`DEBIAN_REPO_TOKEN`** secret in this repo:
-
-- Fine-grained PAT (tightest): Resource owner `ansible-autobott`, only the
-  `debian-repo` repository, Repository permissions → **Contents: Read and
-  write** (enable fine-grained tokens for the org first; approve the request if
-  required).
-- or a classic PAT with the **`repo`** scope (authorize SSO for
-  `ansible-autobott` if enforced).
-
-The `register` action is currently used at `@main`, because debian-repo has not
-tagged a `v1` yet; re-pin `publish.yml` to `@v1` once it does, to insulate this
-repo from format changes.
+**One-time setup** — the `apt` job pushes to `debian-repo` as the ansible-autobott
+APT GitHub App, so this repository needs the org variable **`APT_APP_ID`** and the
+org secret **`APT_APP_PRIVATE_KEY`** shared with it (see the engine's
+[collection-mode docs](https://github.com/andresbott/gh-action-debian-repo/blob/main/docs/collection-mode.md#credentials-for-the-clients)).
 
 Note the uploaded asset is named `klassy_6.7.2-1.sid_amd64.deb` — a `.` where the
 version has a `~`. **GitHub rewrites `~` to `.` in release asset names** (verified:
 uploading `klassy_6.7.2-1~sid_amd64.deb` stores it as `klassy_6.7.2-1.sid_amd64.deb`),
-and debian-repo records its download URL from the filename — so emitting the tilde
-would 404 every publish. `docker/build-package.sh` therefore does the substitution
-itself, keeping the built filename and the asset name identical. The `.deb`'s own
+so the download URL must use the stored name; the engine builds it that way.
+`docker/build-package.sh` does the substitution itself too, keeping the built
+filename and the asset name identical. The `.deb`'s own
 `Version` keeps the tilde, which is what actually matters: apt needs it to rank
 `6.7.2-1~sid` below a future `6.7.2-1`. debian-repo re-derives the pooled filename
 from the control fields, so what apt serves is unaffected.

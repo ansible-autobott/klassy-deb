@@ -46,6 +46,7 @@ REF_debian13_trixie      := v6.5.3
 QT_debian13_trixie       := 6
 IMAGE_debian13_trixie    := debian:trixie-slim
 CODENAME_debian13_trixie := trixie
+PKGREV_debian13_trixie   := 2
 
 # Debian testing (rolling; currently "forky") — Qt6 6.10 / KF6 6.28.
 # CODENAME must track whatever Debian calls testing: when forky is promoted to
@@ -54,12 +55,14 @@ REF_debian_testing      := v6.7.2
 QT_debian_testing       := 6
 IMAGE_debian_testing    := debian:testing-slim
 CODENAME_debian_testing := forky
+PKGREV_debian_testing   := 2
 
 # Debian unstable "sid" — Qt6 6.10 / KF6 6.30
 REF_debian_sid      := v6.7.2
 QT_debian_sid       := 6
 IMAGE_debian_sid    := debian:sid-slim
 CODENAME_debian_sid := sid
+PKGREV_debian_sid   := 2
 
 # Ubuntu 26.04 LTS "resolute" — Qt6 6.10.2 / KF6 6.24 / KDecoration3 6.6.
 # Satisfies v6.7.2's floors (Qt6 >= 6.10, KF6 >= 6.22), so it tracks the latest
@@ -71,3 +74,4 @@ REF_ubuntu2604_resolute      := v6.7.2
 QT_ubuntu2604_resolute       := 6
 IMAGE_ubuntu2604_resolute    := ubuntu:26.04
 CODENAME_ubuntu2604_resolute := resolute
+PKGREV_ubuntu2604_resolute   := 2

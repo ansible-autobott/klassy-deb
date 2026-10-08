@@ -173,6 +173,21 @@ tag: check-release ## publish a new release (make tag RELEASE=debian_sid [FORCE=
 	@git push $(if $(filter 1,$(FORCE)),-f,) origin "$(TAG)"
 	@echo ">> $(RELEASE): CI is now building + publishing klassy $(REF) rev $(PKGREV) (tag $(TAG))"
 
+# `tag` for every release, except a release whose tag already exists is skipped
+# rather than an error, so this publishes exactly the releases with a new version.
+# Tags are fetched first, so one pushed from another clone counts as existing too.
+.PHONY: tag-all
+tag-all: ## publish every release in $(RELEASES) not tagged yet, skipping the rest
+	@git fetch --quiet --tags origin
+	@for r in $(RELEASES); do \
+		t="$$($(MAKE) -s --no-print-directory print-tag RELEASE=$$r)"; \
+		if git rev-parse -q --verify "refs/tags/$$t" >/dev/null; then \
+			echo ">> $$r: $$t already exists — skipping"; \
+		else \
+			$(MAKE) --no-print-directory tag RELEASE=$$r || exit 1; \
+		fi; \
+	done
+
 #==========================================================================================
 ##@ CI
 #==========================================================================================

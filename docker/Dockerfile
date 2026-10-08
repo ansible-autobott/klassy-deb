@@ -3,10 +3,12 @@
 # Per-release klassy builder image. Parameterised by:
 #   BASE_IMAGE  the distro base (e.g. debian:trixie-slim, debian:sid-slim)
 #   RELEASE     selects docker/deps/<release>.list and package metadata
-# so the build links against that release's Qt / KDE Frameworks stack.
+# so the build links against that release's Qt / KDE Frameworks stack. The
+# architecture is the build's --platform: the base image resolves to that variant,
+# so everything inside, and the .deb it emits, is for that arch.
 #
-#   docker build --build-arg BASE_IMAGE=debian:trixie-slim --build-arg RELEASE=debian13_trixie \
-#     -t klassy-deb:debian13_trixie docker
+#   docker build --platform linux/amd64 --build-arg BASE_IMAGE=debian:trixie-slim \
+#     --build-arg RELEASE=debian13_trixie -t klassy-deb:debian13_trixie-amd64 docker
 #
 # Build context is the `docker/` directory (deps/ + build-package.sh).
 

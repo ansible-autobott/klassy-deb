@@ -1,5 +1,6 @@
 # Release definitions — single source of truth shared by the Makefile
-# (via `include`) and the GitHub Actions matrix (via `make print-releases`).
+# (via `include`) and the GitHub Actions matrix (via `make print-releases` and
+# `make print-targets`).
 #
 # To add a release: add its key to RELEASES, set REF_<key> / QT_<key> /
 # IMAGE_<key> / CODENAME_<key>, and create docker/deps/<key>.list with its apt
@@ -29,6 +30,15 @@
 
 RELEASES := debian13_trixie debian_testing debian_sid ubuntu2604_resolute
 
+# Architectures every release is built and published for, by their Debian names
+# (which Docker's platform names match). debian-repo only indexes the ones listed
+# in its own ARCHES, so add a new one there too. CI builds each natively on the
+# GitHub runner named by RUNNER_<arch>: emulated under QEMU, the C++ build would
+# take many times longer.
+ARCHES       := amd64 arm64
+RUNNER_amd64 := ubuntu-latest
+RUNNER_arm64 := ubuntu-24.04-arm
+
 # Debian 13 "trixie" (stable) — Qt6 6.8 / KF6 6.13.
 # v6.5.3 is the newest klassy tag trixie's libraries satisfy (it needs KF6>=6.10,
 # Qt6>=6.6); v6.7+ needs KF6 6.22, which only testing/sid have.
@@ -36,6 +46,7 @@ REF_debian13_trixie      := v6.5.3
 QT_debian13_trixie       := 6
 IMAGE_debian13_trixie    := debian:trixie-slim
 CODENAME_debian13_trixie := trixie
+PKGREV_debian13_trixie   := 2
 
 # Debian testing (rolling; currently "forky") — Qt6 6.10 / KF6 6.28.
 # CODENAME must track whatever Debian calls testing: when forky is promoted to
@@ -44,12 +55,14 @@ REF_debian_testing      := v6.7.2
 QT_debian_testing       := 6
 IMAGE_debian_testing    := debian:testing-slim
 CODENAME_debian_testing := forky
+PKGREV_debian_testing   := 2
 
 # Debian unstable "sid" — Qt6 6.10 / KF6 6.30
 REF_debian_sid      := v6.7.2
 QT_debian_sid       := 6
 IMAGE_debian_sid    := debian:sid-slim
 CODENAME_debian_sid := sid
+PKGREV_debian_sid   := 2
 
 # Ubuntu 26.04 LTS "resolute" — Qt6 6.10.2 / KF6 6.24 / KDecoration3 6.6.
 # Satisfies v6.7.2's floors (Qt6 >= 6.10, KF6 >= 6.22), so it tracks the latest
@@ -61,3 +74,4 @@ REF_ubuntu2604_resolute      := v6.7.2
 QT_ubuntu2604_resolute       := 6
 IMAGE_ubuntu2604_resolute    := ubuntu:26.04
 CODENAME_ubuntu2604_resolute := resolute
+PKGREV_ubuntu2604_resolute   := 2

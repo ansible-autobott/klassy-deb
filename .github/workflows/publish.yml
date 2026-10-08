@@ -4,8 +4,9 @@ name: publish
 # Git-tag driven: `make tag RELEASE=<r>` pushes a tag like debian_sid-v6.7.2-2 and
 # this workflow picks it up. klassy-deb has no version of its own — the release IS
 # the klassy version pinned as REF_<release> in releases.mk, plus the Debian
-# packaging revision PKGREV_<release> (the trailing -2). One-time setup (the
-# APT_APP_ID / APT_APP_PRIVATE_KEY org credentials) is described in the README.
+# packaging revision PKGREV_<release> (the trailing -2). A tag publishes that release
+# for every architecture in ARCHES. One-time setup (the APT_APP_ID /
+# APT_APP_PRIVATE_KEY org credentials) is described in the README.
 on:
   push:
     tags: ['*-v*']              # e.g. debian_sid-v6.7.2-2 (pushed by `make tag`)
@@ -15,16 +16,19 @@ on:
         description: Debian release key from releases.mk (e.g. debian_sid)
         default: debian13_trixie
 
+# Read-only by default: only the release job needs to write, and the builds
+# compile third-party code.
+permissions:
+  contents: read
+
 jobs:
-  build:
+  resolve:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write            # create the release / upload the .deb asset
     outputs:
+      release: ${{ steps.r.outputs.release }}
       tag: ${{ steps.r.outputs.tag }}
       codename: ${{ steps.r.outputs.codename }}
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      targets: ${{ steps.r.outputs.targets }}
     steps:
       - name: Checkout klassy-deb
         uses: actions/checkout@v4
@@ -64,25 +68,68 @@ jobs:
               exit 1
             }
           fi
-          echo "release=$release" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "codename=$codename" >> "$GITHUB_OUTPUT"
+          {
+            echo "release=$release"
+            echo "tag=$tag"
+            echo "codename=$codename"
+            echo "targets=$(make -s print-targets)"
+          } >> "$GITHUB_OUTPUT"
+
+  # One build per architecture, each natively on its own runner (RUNNER_<arch>).
+  build:
+    needs: resolve
+    name: build (${{ matrix.target.arch }})
+    runs-on: ${{ matrix.target.runner }}
+    strategy:
+      matrix:
+        target: ${{ fromJson(needs.resolve.outputs.targets) }}
+    steps:
+      - name: Checkout klassy-deb
+        uses: actions/checkout@v4
 
       - name: Build the .deb
-        run: make ci-build RELEASE="${{ steps.r.outputs.release }}"
+        run: make ci-build RELEASE="${{ needs.resolve.outputs.release }}" ARCH="${{ matrix.target.arch }}"
 
-      - name: Attach the .deb to a GitHub release
+      - name: Upload the .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.target.arch }}
+          path: dist
+          if-no-files-found: error
+
+  # Publishes every architecture or none: it runs only once all the builds have
+  # succeeded, because debian-repo's package file holds one version for all
+  # arches, so a partial publish would drop the missing ones. One job also means
+  # one `gh release create`, which parallel builds would race on.
+  release:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write            # create the release / upload the .deb assets
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}     # no checkout here for gh to read it from
+    steps:
+      - name: Download the .debs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          path: dist
+          merge-multiple: true    # every arch lands in the same dist/<codename>/
+
+      - name: Attach the .debs to a GitHub release
         run: |
-          tag='${{ steps.r.outputs.tag }}'
+          tag='${{ needs.resolve.outputs.tag }}'
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" --generate-notes
-          gh release upload "$tag" "dist/${{ steps.r.outputs.codename }}"/*.deb --clobber
+          gh release upload "$tag" "dist/${{ needs.resolve.outputs.codename }}"/*.deb --clobber
 
-      # Hands the .deb to the apt job below. The whole dist/ (not dist/<codename>)
+      # Hands the .debs to the apt job below. The whole dist/ (not dist/<codename>)
       # is deliberate: the engine reads each SUBDIRECTORY name as the target
       # release, so dist/sid/*.deb registers for sid alone. A flat artifact would
-      # register as `any` and place this build into every suite.
-      - name: Upload the .deb for debian-repo
+      # register as `any` and place this build into every suite. Within it, each
+      # .deb becomes one entry, its arch read from the package itself.
+      - name: Upload the .debs for debian-repo
         uses: actions/upload-artifact@v4
         with:
           name: debs
@@ -99,20 +146,21 @@ jobs:
   # version, and klassy ships different versions per suite (trixie gets v6.5.3
   # — see releases.mk), so a shared packages/klassy.json would mean each tag
   # clobbered the previous suite's entry. Separate files also keep the suites
-  # independent: publishing sid never rewrites trixie's entry.
+  # independent: publishing sid never rewrites trixie's entry. Architectures, on
+  # the other hand, share their suite's file: same version, one entry per arch.
   #
   # `tag` is passed explicitly so a workflow_dispatch run, which is not on a tag,
-  # still names the release holding the .deb.
+  # still names the release holding the .debs.
   apt:
-    needs: build
+    needs: [resolve, release]
     permissions:
       contents: read
     uses: andresbott/gh-action-debian-repo/.github/workflows/publish.yml@v1
     with:
       name: klassy                       # must match the .deb Package field
       artifact: debs
-      tag: ${{ needs.build.outputs.tag }}
-      file: packages/klassy.${{ needs.build.outputs.codename }}.json
+      tag: ${{ needs.resolve.outputs.tag }}
+      file: packages/klassy.${{ needs.resolve.outputs.codename }}.json
       collection: ansible-autobott/debian-repo
       app-id: ${{ vars.APT_APP_ID }}
     secrets:

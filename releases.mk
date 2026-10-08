@@ -1,5 +1,6 @@
 # Release definitions — single source of truth shared by the Makefile
-# (via `include`) and the GitHub Actions matrix (via `make print-releases`).
+# (via `include`) and the GitHub Actions matrix (via `make print-releases` and
+# `make print-targets`).
 #
 # To add a release: add its key to RELEASES, set REF_<key> / QT_<key> /
 # IMAGE_<key> / CODENAME_<key>, and create docker/deps/<key>.list with its apt
@@ -28,6 +29,15 @@
 # because command-line variables take precedence over these assignments.
 
 RELEASES := debian13_trixie debian_testing debian_sid ubuntu2604_resolute
+
+# Architectures every release is built and published for, by their Debian names
+# (which Docker's platform names match). debian-repo only indexes the ones listed
+# in its own ARCHES, so add a new one there too. CI builds each natively on the
+# GitHub runner named by RUNNER_<arch>: emulated under QEMU, the C++ build would
+# take many times longer.
+ARCHES       := amd64 arm64
+RUNNER_amd64 := ubuntu-latest
+RUNNER_arm64 := ubuntu-24.04-arm
 
 # Debian 13 "trixie" (stable) — Qt6 6.8 / KF6 6.13.
 # v6.5.3 is the newest klassy tag trixie's libraries satisfy (it needs KF6>=6.10,

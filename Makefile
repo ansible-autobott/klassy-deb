@@ -1,5 +1,5 @@
 # klassy-deb — build the Klassy KDE Plasma theme as .deb packages for several
-# Debian releases, each compiled in its own Docker container.
+# Debian releases and architectures, each compiled in its own Docker container.
 
 #==========================================================================================
 # Configuration
@@ -12,9 +12,10 @@ IMAGE_NAME  ?= klassy-deb
 # Extra flags passed to the initial `git clone` (e.g. --filter=blob:none, --depth=1).
 CLONE_FLAGS ?=
 
-# Release definitions — RELEASES plus REF_/QT_/IMAGE_/CODENAME_<release> — live in
-# one file so the Makefile and the CI matrix share a single source of
-# truth. Override any value on the CLI, e.g.  make build RELEASE=debian_sid REF_debian_sid=v6.5
+# Release definitions — RELEASES plus REF_/QT_/IMAGE_/CODENAME_<release>, and the
+# ARCHES each is built for — live in one file so the Makefile and the CI matrix
+# share a single source of truth. Override any value on the CLI, e.g.
+#   make build RELEASE=debian_sid REF_debian_sid=v6.5
 include releases.mk
 
 # The release this invocation targets. Override on the CLI:
@@ -31,9 +32,21 @@ CODENAME ?= $(CODENAME_$(RELEASE))
 # rolling alias the apt repo rejects as a release. Override with SUITE=... if needed.
 SUITE    ?= $(CODENAME)
 
+# The architecture this invocation builds, by its Debian name (amd64, arm64), which
+# is also its Docker platform. Defaults to the host's, so the build runs natively;
+# any other runs under QEMU and needs that arch's binfmt_misc handler (see README):
+#   make build RELEASE=debian_sid ARCH=arm64
+HOST_ARCH := $(patsubst x86_64,amd64,$(patsubst aarch64,arm64,$(shell uname -m)))
+ARCH      ?= $(HOST_ARCH)
+
+# Builder image tag — per architecture too, so building one never replaces the
+# other's image.
+BUILDER   = $(IMAGE_NAME):$(RELEASE)-$(ARCH)
+
 # Where a build lands: dist/<codename>/, NOT dist/<release key>/. The engine that
 # registers it in debian-repo reads the subdirectory name as the target release,
-# and only a real codename from debian-repo's DISTS is accepted there.
+# and only a real codename from debian-repo's DISTS is accepted there. Every
+# architecture shares that directory; the _<arch>.deb filename tells them apart.
 OUT_DIR   = $(DIST_DIR)/$(CODENAME)
 
 # Debian packaging revision — bump to re-release the SAME klassy version after a
@@ -83,43 +96,46 @@ clean-src: ## remove the local klassy clone ($(SRC_DIR))
 ##@ Build (Docker)
 #==========================================================================================
 .PHONY: image
-image: check-release ## build the builder image for RELEASE
-	@echo ">> building image $(IMAGE_NAME):$(RELEASE) (base $(IMAGE))"
+image: check-release ## build the builder image for RELEASE and ARCH
+	@echo ">> building image $(BUILDER) (base $(IMAGE), linux/$(ARCH))"
 	@docker build \
+		--platform linux/$(ARCH) \
 		--build-arg BASE_IMAGE=$(IMAGE) \
 		--build-arg RELEASE=$(RELEASE) \
-		-t $(IMAGE_NAME):$(RELEASE) \
+		-t $(BUILDER) \
 		-f docker/Dockerfile \
 		docker
 
 .PHONY: build
 build: update image ## compile klassy in Docker and emit a .deb -> $(DIST_DIR)/<codename>/
 	@mkdir -p "$(OUT_DIR)"
-	@echo ">> building klassy .deb for $(RELEASE) (ref $(REF), Qt$(QT), suite $(SUITE), rev $(PKGREV))"
+	@echo ">> building klassy .deb for $(RELEASE) on $(ARCH) (ref $(REF), Qt$(QT), suite $(SUITE), rev $(PKGREV))"
 	@docker run --rm \
+		--platform linux/$(ARCH) \
 		-v "$(CURDIR_ABS)/$(SRC_DIR):/src:ro" \
 		-v "$(CURDIR_ABS)/$(OUT_DIR):/out" \
 		-e QT_MAJOR="$(QT)" \
 		-e DEB_SUITE="$(SUITE)" \
 		-e PKGREV="$(PKGREV)" \
 		-e DEB_MAINTAINER="$(DEB_MAINTAINER)" \
-		$(IMAGE_NAME):$(RELEASE)
+		$(BUILDER)
 
 .PHONY: build-all
-build-all: ## build a .deb for every release in $(RELEASES)
+build-all: ## build a .deb for every release in $(RELEASES), for ARCH
 	@for r in $(RELEASES); do \
 		echo "==================== build $$r ===================="; \
 		$(MAKE) --no-print-directory build RELEASE=$$r || exit 1; \
 	done
 
 .PHONY: shell
-shell: check-release image ## open a shell in the builder image for RELEASE (debugging)
+shell: check-release image ## open a shell in the builder image for RELEASE and ARCH (debugging)
 	@docker run --rm -it \
+		--platform linux/$(ARCH) \
 		-v "$(CURDIR_ABS)/$(SRC_DIR):/src:ro" \
 		-v "$(CURDIR_ABS)/$(OUT_DIR):/out" \
 		-e QT_MAJOR="$(QT)" -e DEB_SUITE="$(SUITE)" \
 		--entrypoint /bin/bash \
-		$(IMAGE_NAME):$(RELEASE)
+		$(BUILDER)
 
 #==========================================================================================
 ##@ Artifacts
@@ -161,12 +177,16 @@ tag: check-release ## publish a new release (make tag RELEASE=debian_sid [FORCE=
 ##@ CI
 #==========================================================================================
 .PHONY: ci-build
-ci-build: ## build entrypoint used by GitHub Actions (expects RELEASE=..)
-	@$(MAKE) --no-print-directory build RELEASE=$(RELEASE)
+ci-build: ## build entrypoint used by GitHub Actions (expects RELEASE=.. ARCH=..)
+	@$(MAKE) --no-print-directory build RELEASE=$(RELEASE) ARCH=$(ARCH)
 
 .PHONY: print-releases
 print-releases: ## print $(RELEASES) as a JSON array (feeds the CI matrix)
 	@awk 'BEGIN{n=split("$(RELEASES)",a," ");printf "[";for(i=1;i<=n;i++)printf "%s\"%s\"",(i>1?",":""),a[i];print "]"}'
+
+.PHONY: print-targets
+print-targets: ## print $(ARCHES) with their CI runners as a JSON array (feeds the CI matrix)
+	@printf '{"arch":"%s","runner":"%s"}\n' $(foreach a,$(ARCHES),$(a) $(RUNNER_$(a))) | paste -sd, - | sed 's/.*/[&]/'
 
 .PHONY: print-ref
 print-ref: ## print the klassy ref/tag for RELEASE (used by publish.yml)
@@ -205,4 +225,4 @@ check-release:
 #==========================================================================================
 .PHONY: help
 help: ## display this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m [RELEASE=<release>]\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m [RELEASE=<release>] [ARCH=<arch>]\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)

@@ -2,8 +2,9 @@
 
 Build the [Klassy](https://github.com/paulmcauley/klassy) KDE Plasma theme
 (window decoration + application style) as installable **`.deb`** packages for
-several Debian and Ubuntu releases. Each release is compiled inside its own
-Docker container so it links against that release's Qt / KDE Frameworks stack.
+several Debian and Ubuntu releases, on **amd64** and **arm64**. Each release is
+compiled inside its own Docker container so it links against that release's Qt /
+KDE Frameworks stack.
 
 ## Why per-release Docker builds
 
@@ -38,11 +39,35 @@ Qt6 6.10. To retarget a release, override its ref:
 make build RELEASE=debian13_trixie REF_debian13_trixie=v6.7   # + tune its deps list
 ```
 
+## Architectures
+
+Every release is built for each architecture in `ARCHES` in `releases.mk`
+(`amd64` and `arm64`). The packaging is the same for all of them:
+`build-package.sh` reads the architecture from the container
+(`dpkg --print-architecture`) and derives the library path, the `Depends` and the
+`_<arch>.deb` filename from it, so both packages land side by side in
+`dist/<codename>/`.
+
+`make build` builds for the host's architecture, natively. Pass `ARCH` for
+another one, which Docker then runs under QEMU emulation:
+
+```sh
+make build RELEASE=debian_sid ARCH=arm64      # on an amd64 host
+```
+
+Emulation needs QEMU's `binfmt_misc` handler for the target architecture. Docker
+Desktop ships it; a Linux host registers it (until reboot) with
+`docker run --privileged --rm tonistiigi/binfmt --install arm64`. Expect an
+emulated build to take many times longer than a native one. CI never emulates: it
+builds each architecture on a native GitHub runner, the one `RUNNER_<arch>` names
+in `releases.mk` (`ubuntu-24.04-arm` for arm64).
+
 ## Quick start
 
 ```sh
 make                                  # help
 make build RELEASE=debian13_trixie    # clone -> image -> compile -> package
+make build RELEASE=debian13_trixie ARCH=arm64   # same, for arm64
 make build-all                        # build every release in $(RELEASES)
 make list                             # show built .deb files
 ```
@@ -55,14 +80,14 @@ The klassy source is cloned into `src/klassy/` and packages land in
 ```
 .
 ├── Makefile                     # clone / build / package targets
-├── releases.mk                  # single source of truth: releases + refs + base images
+├── releases.mk                  # single source of truth: releases + refs + base images + arches
 ├── docker/
 │   ├── Dockerfile               # ARG BASE_IMAGE + RELEASE -> per-release build
 │   ├── build-package.sh         # cmake build + install -> dpkg-deb
 │   └── deps/<release>.list      # apt build-deps per release (tunable)
 ├── src/klassy/                  # (git-ignored) upstream clone
 ├── dist/<codename>/*.deb        # (git-ignored) built artifacts
-└── .github/workflows/build.yml  # matrix CI derived from `make print-releases`
+└── .github/workflows/build.yml  # matrix CI derived from `make print-releases` + `print-targets`
 ```
 
 ## Targets
@@ -73,20 +98,25 @@ Run `make help` for the full list. Highlights:
 |--------------|------------------------------------------------------------|
 | `clone`      | clone klassy into `src/klassy` (idempotent)                |
 | `update`     | fetch + checkout the pinned ref for `RELEASE`              |
-| `image`      | build the builder image for `RELEASE`                      |
-| `build`      | compile in Docker and emit a `.deb` into `dist/RELEASE/`   |
-| `build-all`  | run `build` for every release in `$(RELEASES)`             |
+| `image`      | build the builder image for `RELEASE` and `ARCH`           |
+| `build`      | compile in Docker and emit a `.deb` into `dist/<codename>/` |
+| `build-all`  | run `build` for every release in `$(RELEASES)`, for `ARCH` |
 | `shell`      | drop into the builder image for debugging                  |
 | `list`       | list built `.deb` files                                    |
 | `clean` / `clean-all` | remove `dist/` (and the clone)                    |
 | `ci-build`   | thin entrypoint used by GitHub Actions                     |
 | `print-releases` | print `$(RELEASES)` as JSON (feeds the CI matrix)      |
+| `print-targets`  | print `$(ARCHES)` + their runners as JSON (feeds the CI matrix) |
 
 ## Adding / tuning a release
 
 Everything lives in `releases.mk` (`RELEASES` + `REF_<key>` / `QT_<key>` /
 `IMAGE_<key>`) plus a matching `docker/deps/<key>.list`. Add a line to each and
 the Makefile *and* CI pick it up automatically.
+
+An architecture is added the same way: append it to `ARCHES` and name the GitHub
+runner that builds it natively as `RUNNER_<arch>`. debian-repo must also list it
+in its own `ARCHES`, or the publish is rejected.
 
 Each release's build deps in `docker/deps/<release>.list` (one apt package per
 line; `#` comments allowed) are a best-effort starting point taken from klassy's
@@ -96,9 +126,11 @@ line; `#` comments allowed) are a best-effort starting point taken from klassy's
 
 ## CI
 
-`.github/workflows/build.yml` builds every release in a matrix derived from
-`make print-releases` (i.e. from `releases.mk`), so it can't drift from a local
-`make build-all`. Each `.deb` is uploaded as an artifact.
+`.github/workflows/build.yml` builds every release for every architecture in a
+matrix derived from `make print-releases` and `make print-targets` (i.e. from
+`releases.mk`), so it can't drift from a local `make build-all`. Each
+architecture builds natively on its own runner, and each `.deb` is uploaded as an
+artifact.
 
 ## Publishing to the shared apt repo
 
@@ -112,11 +144,17 @@ needed locally — no `gh`): `make tag` derives the tag from both and pushes it,
 make tag RELEASE=debian_sid        # -> pushes tag  debian_sid-v6.7.2-1
 ```
 
-On that tag CI builds the `.deb`, attaches it to a GitHub release, then hands it
-to the [gh-action-debian-repo](https://github.com/andresbott/gh-action-debian-repo)
-engine — which commits `packages/klassy.<codename>.json` to debian-repo and
-triggers a publish there. You never type a version; it comes from
-`REF_<release>` and is read back out of the built `.deb`.
+On that tag CI builds a `.deb` per architecture (in parallel, each on its native
+runner), attaches them all to one GitHub release, then hands them to the
+[gh-action-debian-repo](https://github.com/andresbott/gh-action-debian-repo)
+engine — which commits `packages/klassy.<codename>.json`, with one entry per
+architecture, to debian-repo and triggers a publish there. You never type a
+version; it comes from `REF_<release>` and is read back out of the built `.deb`.
+
+A tag publishes every architecture or none: the GitHub release is only created
+once all the builds have succeeded, because a codename's package file holds one
+version for all its architectures. If one build fails, *Re-run failed jobs* on
+the run — the release and publish jobs follow once it passes.
 
 The engine only accepts a codename listed in debian-repo's own `DISTS`, so a
 release whose codename isn't there yet (e.g. Ubuntu's `resolute`) must be added
@@ -145,7 +183,7 @@ dirty, and `publish.yml` fails the build if the tag's `-<rev>` and
 `PKGREV_<release>` disagree. Passing `PKGREV=2` on the command line is for local
 builds (`make build RELEASE=debian_sid PKGREV=2`); a tag pushed that way is rejected.
 
-(CI builds the `.deb` and uploads it to the GitHub release itself — `gh` runs
+(CI builds the `.deb`s and uploads them to the GitHub release itself — `gh` runs
 only on the runner. Locally you only need `git`.)
 
 **One-time setup** — the `apt` job pushes to `debian-repo` as the ansible-autobott
@@ -199,8 +237,9 @@ decoration needs a KWin to load it, and systemsettings to select it) and
 Verify a build's dependencies resolve on a clean system with:
 
 ```sh
-docker run --rm -v "$PWD/dist/trixie:/deb:ro" debian:trixie-slim \
-  sh -c 'apt-get update -qq && apt-get install -y --simulate /deb/klassy_*.deb'
+arch=amd64   # or arm64 (emulated on an amd64 host, see Architectures)
+docker run --rm --platform "linux/$arch" -v "$PWD/dist/trixie:/deb:ro" debian:trixie-slim \
+  sh -c "apt-get update -qq && apt-get install -y --simulate /deb/klassy_*_$arch.deb"
 ```
 
 ### Maintainer

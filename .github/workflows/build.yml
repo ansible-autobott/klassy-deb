@@ -7,38 +7,44 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Single source of truth: the release matrix comes from releases.mk via the
-  # Makefile, so it can never drift from a local `make build-all`.
+  # Single source of truth: the release and architecture matrix comes from
+  # releases.mk via the Makefile, so it can never drift from a local `make build-all`.
   setup:
     runs-on: ubuntu-latest
     outputs:
-      releases: ${{ steps.releases.outputs.releases }}
+      releases: ${{ steps.matrix.outputs.releases }}
+      targets: ${{ steps.matrix.outputs.targets }}
     steps:
       - name: Checkout klassy-deb
         uses: actions/checkout@v4
-      - name: Resolve release matrix
-        id: releases
-        run: echo "releases=$(make -s print-releases)" >> "$GITHUB_OUTPUT"
+      - name: Resolve release + architecture matrix
+        id: matrix
+        run: |
+          echo "releases=$(make -s print-releases)" >> "$GITHUB_OUTPUT"
+          echo "targets=$(make -s print-targets)" >> "$GITHUB_OUTPUT"
 
   build:
     needs: setup
-    runs-on: ubuntu-latest
+    name: build (${{ matrix.release }}, ${{ matrix.target.arch }})
+    # each architecture builds natively on its own runner (RUNNER_<arch>)
+    runs-on: ${{ matrix.target.runner }}
     strategy:
       fail-fast: false
       matrix:
         release: ${{ fromJson(needs.setup.outputs.releases) }}
+        target: ${{ fromJson(needs.setup.outputs.targets) }}
 
     steps:
       - name: Checkout klassy-deb
         uses: actions/checkout@v4
 
-      - name: Build klassy .deb for ${{ matrix.release }}
-        run: make ci-build RELEASE=${{ matrix.release }}
+      - name: Build klassy .deb for ${{ matrix.release }} (${{ matrix.target.arch }})
+        run: make ci-build RELEASE=${{ matrix.release }} ARCH=${{ matrix.target.arch }}
 
       - name: Upload package
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: klassy-${{ matrix.release }}
+          name: klassy-${{ matrix.release }}-${{ matrix.target.arch }}
           path: dist/*/*.deb        # dist/<codename>/ — one per job, see releases.mk
           if-no-files-found: warn

@@ -104,6 +104,7 @@ Run `make help` for the full list. Highlights:
 | `shell`      | drop into the builder image for debugging                  |
 | `list`       | list built `.deb` files                                    |
 | `clean` / `clean-all` | remove `dist/` (and the clone)                    |
+| `tag` / `tag-all` | publish one release / every release not tagged yet    |
 | `ci-build`   | thin entrypoint used by GitHub Actions                     |
 | `print-releases` | print `$(RELEASES)` as JSON (feeds the CI matrix)      |
 | `print-targets`  | print `$(ARCHES)` + their runners as JSON (feeds the CI matrix) |
@@ -142,7 +143,12 @@ needed locally — no `gh`): `make tag` derives the tag from both and pushes it,
 
 ```sh
 make tag RELEASE=debian_sid        # -> pushes tag  debian_sid-v6.7.2-1
+make tag-all                       # -> the same for every release not tagged yet
 ```
+
+`tag-all` skips a release whose tag already exists (after fetching origin's tags)
+instead of failing, so after a change that touches several releases — a `PKGREV`
+bump across the board, say — it publishes exactly the ones with a new version.
 
 On that tag CI builds a `.deb` per architecture (in parallel, each on its native
 runner), attaches them all to one GitHub release, then hands them to the
